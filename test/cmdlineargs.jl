@@ -33,7 +33,7 @@ end
 
 # Returns true if the given command errors, but doesn't signal
 function errors_not_signals(cmd::Cmd)
-    p = run(ignorestatus(cmd))
+    p = run(pipeline(ignorestatus(cmd); stdout=devnull, stderr=devnull))
     return errors_not_signals(p)
 end
 errors_not_signals(p::Base.Process) = process_exited(p) && !Base.process_signaled(p) && !success(p)
@@ -678,7 +678,6 @@ let exename = `$(Base.julia_cmd().exec[1]) -t 1`
                 @test !occursin("EXCEPTION_ACCESS_VIOLATION", s)
             end
             @test errors_not_signals(p)
-            @test !Base.process_signaled(p)
             @test p.exitcode == 1
         end
     end
@@ -689,7 +688,6 @@ let exename = `$(Base.julia_cmd().exec[1]) -t 1`
             @test s == "ERROR: System image file failed consistency check: maybe opened the wrong version?\n"
         end
         @test errors_not_signals(p)
-        @test !Base.process_signaled(p)
         @test p.exitcode == 1
     end
 end
