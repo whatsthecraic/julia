@@ -32,7 +32,7 @@ extern "C" {
 
 JL_DLLEXPORT void JL_NORETURN jl_error(const char *str)
 {
-    if (jl_errorexception_type == NULL) {
+    if (jl_errorexception_type == NULL || jl_error_sym == NULL) {
         jl_printf(JL_STDERR, "ERROR: %s\n", str);
         jl_exit(1);
     }
@@ -72,6 +72,13 @@ JL_DLLEXPORT void JL_NORETURN jl_errorf(const char *fmt, ...)
 {
     va_list args;
     va_start(args, fmt);
+    // Don't attempt to backtrace if we're early on in bringup
+    if (jl_errorexception_type == NULL || jl_error_sym == NULL) {
+        jl_printf(JL_STDERR, "ERROR: ");
+        jl_vprintf(JL_STDERR, fmt, args);
+        jl_printf(JL_STDERR, "\n");
+        jl_exit(1);
+    }
     jl_value_t *e = jl_vexceptionf(jl_errorexception_type, fmt, args);
     va_end(args);
     jl_throw(e);
