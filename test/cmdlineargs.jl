@@ -36,7 +36,10 @@ function errors_not_signals(cmd::Cmd)
     p = run(pipeline(ignorestatus(cmd); stdout=devnull, stderr=devnull))
     return errors_not_signals(p)
 end
-errors_not_signals(p::Base.Process) = process_exited(p) && !Base.process_signaled(p) && !success(p)
+function errors_not_signals(p::Base.Process)
+    wait(p)
+    return process_exited(p) && !Base.process_signaled(p) && !success(p)
+end
 
 let
     fn = format_filename("a%d %p %i %L %l %u z")
