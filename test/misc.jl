@@ -984,7 +984,7 @@ end
 # issue #27239
 @testset "strftime tests issue #27239" begin
     # change to non-Unicode Korean
-    korloc = ["ko_KR.EUC-KR", "ko_KR.CP949", "ko_KR.949", "Korean_Korea.949"]
+    korloc = ["ko_KR.UTF-8", "ko_KR.EUC-KR", "ko_KR.CP949", "ko_KR.949", "Korean_Korea.949"]
     timestrs = String[]
     withlocales(korloc) do
         # system dependent formats
