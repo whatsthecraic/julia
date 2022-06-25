@@ -9,7 +9,6 @@ function withlocales(f, newlocales)
             locales[cat] = unsafe_string(cstr)
         end
     end
-    timestrs = String[]
     try
         # change to each of given locales
         for lc in newlocales
