@@ -223,7 +223,7 @@ JL_DLLEXPORT void jl_atexit_hook(int exitcode)
         jl_write_coverage_data(jl_options.output_code_coverage);
     if (jl_options.malloc_log)
         jl_write_malloc_log();
-    if (jl_base_module) {
+    if (jl_base_module && jl_error_sym) {
         jl_value_t *f = jl_get_global(jl_base_module, jl_symbol("_atexit"));
         if (f != NULL) {
             JL_TRY {
