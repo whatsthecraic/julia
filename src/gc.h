@@ -707,6 +707,29 @@ size_t jl_array_nbytes(jl_array_t *a) JL_NOTSAFEPOINT;
 JL_DLLEXPORT void jl_enable_gc_logging(int enable);
 void _report_gc_finished(uint64_t pause, uint64_t freed, int full, int recollect) JL_NOTSAFEPOINT;
 
+JL_DLLEXPORT void jl_gc_addptr(void* pointer);
+JL_DLLEXPORT void jl_gc_trace();
+int jl_gc_is_tracing_enabled();
+// Copy & paste from https://github.com/JuliaLang/julia/pull/42286/files
+// ---------------------------------------------------------------------
+// Functions to call from GC when heap snapshot is enabled
+// ---------------------------------------------------------------------
+void gc_record_root(jl_value_t *root, const char *name);
+void gc_record_frame_to_object_edge(jl_gcframe_t *from, jl_value_t *to);
+void gc_record_task_to_frame_edge(jl_task_t *from, jl_gcframe_t *to);
+void gc_record_frame_to_frame_edge(jl_gcframe_t *from, jl_gcframe_t *to);
+void gc_record_array_edge(jl_value_t *from, jl_value_t *to, size_t index);
+void gc_record_module_edge(jl_module_t *from, jl_value_t *to, const char *name);
+void gc_record_module_edge_globalref(jl_module_t *from, jl_value_t *to, const  char *name); // cached global ref
+void gc_record_object_edge(jl_value_t *from, jl_value_t *to, void* slot);
+// Used for objects managed by GC, but which aren't exposed in the julia object, so have no
+// field or index.  i.e. they're not reacahable from julia code, but we _will_ hit them in
+// the GC mark phase (so we can check their type tag to get the size).
+void gc_record_internal_edge(jl_value_t *from, jl_value_t *to);
+// Used for objects manually allocated in C (outside julia GC), to still tell the heap snapshot about the
+// size of the object, even though we're never going to mark that object.
+void gc_record_hidden_edge(jl_value_t *from, size_t bytes);
+
 #ifdef __cplusplus
 }
 #endif
