@@ -3,16 +3,24 @@
 """
 Methods for working with Iterators.
 """
-module Iterators
+baremodule Iterators
 
 # small dance to make this work from Base or Intrinsics
 import ..@__MODULE__, ..parentmodule
 const Base = parentmodule(@__MODULE__)
 using .Base:
-    @inline, Pair, Pairs, AbstractDict, IndexLinear, IndexCartesian, IndexStyle, AbstractVector, Vector,
+    @inline, Pair, Pairs, AbstractDict, IndexLinear, IndexStyle, AbstractVector, Vector,
     tail, SizeUnknown, HasLength, HasShape, IsInfinite, EltypeUnknown, HasEltype, OneTo,
-    @propagate_inbounds, @isdefined, @boundscheck, @inbounds, Generator, AbstractRange,
-    LinearIndices, (:), |, +, -, !==, !, <=, <, missing, any, _counttuple
+    @propagate_inbounds, @isdefined, @boundscheck, @inbounds, Generator,
+    AbstractRange, AbstractUnitRange, UnitRange, LinearIndices,
+    (:), |, +, -, *, !==, !, ==, !=, <=, <, >, >=, missing,
+    any, _counttuple, eachindex, ntuple, zero, prod, in, firstindex, lastindex,
+    fieldtypes, min, max, minimum, zero, oneunit, promote, promote_shape
+
+if Base !== Core.Compiler
+using .Base:
+    cld, fld, SubArray, view, resize!, IndexCartesian
+end
 
 import .Base:
     first, last,
@@ -20,9 +28,13 @@ import .Base:
     eltype, IteratorSize, IteratorEltype,
     haskey, keys, values, pairs,
     getindex, setindex!, get, iterate,
-    popfirst!, isdone, peek
+    popfirst!, isdone, peek, intersect
 
-export enumerate, zip, rest, countfrom, take, drop, takewhile, dropwhile, cycle, repeated, product, flatten, partition, flatmap
+export enumerate, zip, rest, countfrom, take, drop, takewhile, dropwhile, cycle, repeated, product, flatten, flatmap
+
+if Base !== Core.Compiler
+export partition
+end
 
 """
     Iterators.map(f, iterators...)
@@ -241,16 +253,19 @@ CartesianIndex(2, 2) e
 See also [`IndexStyle`](@ref), [`axes`](@ref).
 """
 pairs(::IndexLinear,    A::AbstractArray) = Pairs(A, LinearIndices(A))
-pairs(::IndexCartesian, A::AbstractArray) = Pairs(A, CartesianIndices(axes(A)))
 
 # preserve indexing capabilities for known indexable types
 # faster than zip(keys(a), values(a)) for arrays
 pairs(tuple::Tuple) = Pairs{Int}(tuple, keys(tuple))
 pairs(nt::NamedTuple) = Pairs{Symbol}(nt, keys(nt))
 pairs(v::Core.SimpleVector) = Pairs(v, LinearIndices(v))
-pairs(A::AbstractArray)  = pairs(IndexCartesian(), A)
 pairs(A::AbstractVector) = pairs(IndexLinear(), A)
 # pairs(v::Pairs) = v # listed for reference, but already defined from being an AbstractDict
+
+if Base !== Core.Compiler
+pairs(::IndexCartesian, A::AbstractArray) = Pairs(A, Base.CartesianIndices(axes(A)))
+pairs(A::AbstractArray)  = pairs(IndexCartesian(), A)
+end
 
 length(v::Pairs) = length(getfield(v, :itr))
 axes(v::Pairs) = axes(getfield(v, :itr))
@@ -277,7 +292,7 @@ end
 @inline isdone(v::Pairs, state...) = isdone(getfield(v, :itr), state...)
 
 IteratorSize(::Type{<:Pairs{<:Any, <:Any, I}}) where {I} = IteratorSize(I)
-IteratorSize(::Type{<:Pairs{<:Any, <:Any, <:Base.AbstractUnitRange, <:Tuple}}) = HasLength()
+IteratorSize(::Type{<:Pairs{<:Any, <:Any, <:AbstractUnitRange, <:Tuple}}) = HasLength()
 
 function last(v::Pairs{K, V}) where {K, V}
     idx = last(getfield(v, :itr))
@@ -1089,6 +1104,7 @@ end
 
 reverse(p::ProductIterator) = ProductIterator(Base.map(reverse, p.iterators))
 last(p::ProductIterator) = Base.map(last, p.iterators)
+intersect(a::ProductIterator, b::ProductIterator) = ProductIterator(intersect.(a.iterators, b.iterators))
 
 # flatten an iterator of iterators
 
@@ -1197,6 +1213,7 @@ julia> Iterators.flatmap(n->-n:2:n, 1:3) |> collect
 """
 flatmap(f, c...) = flatten(map(f, c...))
 
+if Base !== Core.Compiler # views are not defined
 """
     partition(collection, n)
 
@@ -1221,7 +1238,7 @@ struct PartitionIterator{T}
     n::Int
 end
 # Partitions are explicitly a linear indexing operation, so reshape to 1-d immediately
-PartitionIterator(A::AbstractArray, n::Int) = PartitionIterator(vec(A), n)
+PartitionIterator(A::AbstractArray, n::Int) = PartitionIterator(Base.vec(A), n)
 PartitionIterator(v::AbstractVector, n::Int) = PartitionIterator{typeof(v)}(v, n)
 
 eltype(::Type{PartitionIterator{T}}) where {T} = Vector{eltype(T)}
@@ -1358,26 +1375,22 @@ function reset!(s::Stateful{T,VS}, itr::T=s.itr) where {T,VS}
     s
 end
 
-if Base === Core.Compiler
-    approx_iter_type(a::Type) = Any
-else
-    # Try to find an appropriate type for the (value, state tuple),
-    # by doing a recursive unrolling of the iteration protocol up to
-    # fixpoint.
-    approx_iter_type(itrT::Type) = _approx_iter_type(itrT, Base._return_type(iterate, Tuple{itrT}))
-    # Not actually called, just passed to return type to avoid
-    # having to typesplit on Nothing
-    function doiterate(itr, valstate::Union{Nothing, Tuple{Any, Any}})
-        valstate === nothing && return nothing
-        val, st = valstate
-        return iterate(itr, st)
-    end
-    function _approx_iter_type(itrT::Type, vstate::Type)
-        vstate <: Union{Nothing, Tuple{Any, Any}} || return Any
-        vstate <: Union{} && return Union{}
-        nextvstate = Base._return_type(doiterate, Tuple{itrT, vstate})
-        return (nextvstate <: vstate ? vstate : Any)
-    end
+# Try to find an appropriate type for the (value, state tuple),
+# by doing a recursive unrolling of the iteration protocol up to
+# fixpoint.
+approx_iter_type(itrT::Type) = _approx_iter_type(itrT, Base._return_type(iterate, Tuple{itrT}))
+# Not actually called, just passed to return type to avoid
+# having to typesplit on Nothing
+function doiterate(itr, valstate::Union{Nothing, Tuple{Any, Any}})
+    valstate === nothing && return nothing
+    val, st = valstate
+    return iterate(itr, st)
+end
+function _approx_iter_type(itrT::Type, vstate::Type)
+    vstate <: Union{Nothing, Tuple{Any, Any}} || return Any
+    vstate <: Union{} && return Union{}
+    nextvstate = Base._return_type(doiterate, Tuple{itrT, vstate})
+    return (nextvstate <: vstate ? vstate : Any)
 end
 
 convert(::Type{Stateful}, itr) = Stateful(itr)
@@ -1387,7 +1400,7 @@ convert(::Type{Stateful}, itr) = Stateful(itr)
 @inline function popfirst!(s::Stateful)
     vs = s.nextvalstate
     if vs === nothing
-        throw(EOFError())
+        throw(Base.EOFError())
     else
         val, state = vs
         Core.setfield!(s, :nextvalstate, iterate(s.itr, state))
@@ -1405,6 +1418,7 @@ IteratorSize(::Type{Stateful{T,VS}}) where {T,VS} = IteratorSize(T) isa HasShape
 eltype(::Type{Stateful{T, VS}} where VS) where {T} = eltype(T)
 IteratorEltype(::Type{Stateful{T,VS}}) where {T,VS} = IteratorEltype(T)
 length(s::Stateful) = length(s.itr) - s.taken
+end
 
 """
     only(x)
@@ -1461,8 +1475,5 @@ only(x::NamedTuple{<:Any, <:Tuple{Any}}) = first(x)
 only(x::NamedTuple) = throw(
     ArgumentError("NamedTuple contains $(length(x)) elements, must contain exactly 1 element")
 )
-
-
-Base.intersect(a::ProductIterator, b::ProductIterator) = ProductIterator(intersect.(a.iterators, b.iterators))
 
 end

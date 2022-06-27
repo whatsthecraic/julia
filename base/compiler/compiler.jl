@@ -60,6 +60,22 @@ include("refvalue.jl")
 
 # the same constructor as defined in float.jl, but with a different name to avoid redefinition
 _Bool(x::Real) = x==0 ? false : x==1 ? true : throw(InexactError(:Bool, Bool, x))
+# fld(x,y) == div(x,y) - ((x>=0) != (y>=0) && rem(x,y) != 0 ? 1 : 0)
+fld(x::T, y::T) where {T<:Unsigned} = div(x, y)
+function fld(x::T, y::T) where T<:Integer
+    d = div(x, y)
+    return d - (signbit(x ⊻ y) & (d * y != x))
+end
+# cld(x,y) = div(x,y) + ((x>0) == (y>0) && rem(x,y) != 0 ? 1 : 0)
+function cld(x::T, y::T) where T<:Unsigned
+    d = div(x, y)
+    return d + (d * y != x)
+end
+function cld(x::T, y::T) where T<:Integer
+    d = div(x, y)
+    return d + (((x > 0) == (y > 0)) & (d * y != x))
+end
+
 
 # checked arithmetic
 const checked_add = +
@@ -80,6 +96,13 @@ include("indices.jl")
 include("array.jl")
 include("abstractarray.jl")
 
+ntuple(f, ::Val{0}) = ()
+ntuple(f, ::Val{1}) = (@inline; (f(1),))
+ntuple(f, ::Val{2}) = (@inline; (f(1), f(2)))
+ntuple(f, ::Val{3}) = (@inline; (f(1), f(2), f(3)))
+ntuple(f, ::Val{n}) where {n} = ntuple(f, n::Int)
+ntuple(f, n) = (Any[f(i) for i = 1:n]...,)
+
 # core structures
 include("bitarray.jl")
 include("bitset.jl")
@@ -91,13 +114,6 @@ include("iterators.jl")
 using .Iterators: zip, enumerate
 using .Iterators: Flatten, Filter, product  # for generators
 include("namedtuple.jl")
-
-ntuple(f, ::Val{0}) = ()
-ntuple(f, ::Val{1}) = (@inline; (f(1),))
-ntuple(f, ::Val{2}) = (@inline; (f(1), f(2)))
-ntuple(f, ::Val{3}) = (@inline; (f(1), f(2), f(3)))
-ntuple(f, ::Val{n}) where {n} = ntuple(f, n::Int)
-ntuple(f, n) = (Any[f(i) for i = 1:n]...,)
 
 # core docsystem
 include("docs/core.jl")

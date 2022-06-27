@@ -126,6 +126,8 @@ include("refvalue.jl")
 include("refpointer.jl")
 include("checked.jl")
 using .Checked
+function cld end
+function fld end
 
 # Lazy strings
 include("strings/lazy.jl")
