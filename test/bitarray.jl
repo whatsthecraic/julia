@@ -1787,3 +1787,21 @@ end
         @test all(bitarray[rangein, rangeout] .== true)
     end
 end
+
+# issue #45825
+
+isdefined(Main, :OffsetArrays) || @eval Main include("testhelpers/OffsetArrays.jl")
+using .Main.OffsetArrays
+
+let all_false = OffsetArray(falses(2001), -1000:1000)
+    @test !any(==(true), all_false)
+    # should be run with --check-bounds=yes
+    @test !any(==(true), BitArray(all_false))
+end
+let a = falses(1000),
+    msk = BitArray(rand(Bool, 1000)),
+    n = count(msk),
+    b = OffsetArray(rand(Bool, n), (-n÷2):(n÷2)-iseven(n))
+    a[msk] = b
+    @test a[msk] == collect(b)
+end

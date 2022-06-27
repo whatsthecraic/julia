@@ -506,20 +506,23 @@ function BitArray{N}(A::AbstractArray{T,N}) where N where T
     Bc = B.chunks
     l = length(B)
     l == 0 && return B
-    ind = 1
+    Aind = eachindex(A)
+    nextA = iterate(Aind)
     @inbounds begin
         for i = 1:length(Bc)-1
             c = UInt64(0)
             for j = 0:63
+                ind, Ast = nextA
                 c |= (UInt64(convert(Bool, A[ind])::Bool) << j)
-                ind += 1
+                nextA = iterate(Aind, Ast)
             end
             Bc[i] = c
         end
         c = UInt64(0)
         for j = 0:_mod64(l-1)
+            ind, Ast = nextA
             c |= (UInt64(convert(Bool, A[ind])::Bool) << j)
-            ind += 1
+            nextA = iterate(Aind, Ast)
         end
         Bc[end] = c
     end
@@ -721,24 +724,26 @@ function _unsafe_setindex!(B::BitArray, X::AbstractArray, I::BitArray)
     lx = length(X)
     last_chunk_len = _mod64(length(B)-1)+1
 
-    c = 1
+    Xind = eachindex(X)
+    nextX = iterate(Xind)
     for i = 1:lc
         @inbounds Imsk = Ic[i]
         @inbounds C = Bc[i]
         u = UInt64(1)
         for j = 1:(i < lc ? 64 : last_chunk_len)
             if Imsk & u != 0
-                lx < c && throw_setindex_mismatch(X, c)
-                @inbounds x = convert(Bool, X[c])
+                nextX === nothing && throw_setindex_mismatch(X, count(I))
+                Xi, Xst = nextX
+                @inbounds x = convert(Bool, X[Xi])
                 C = ifelse(x, C | u, C & ~u)
-                c += 1
+                nextX = iterate(Xind, Xst)
             end
             u <<= 1
         end
         @inbounds Bc[i] = C
     end
-    if length(X) != c-1
-        throw_setindex_mismatch(X, c-1)
+    if nextX !== nothing
+        throw_setindex_mismatch(X, count(I))
     end
     return B
 end
