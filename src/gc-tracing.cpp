@@ -196,7 +196,6 @@ void gc_record_root(jl_value_t *root, const char *name){
 
     auto it = g_index.emplace(root, root);
     if (!it.second) return; // does the root already exist?
-    //cout << "[gc_record_root] root: " << root << ", name: " << name << endl;
     FR("root inserted");
 
     it.first->second.set_root(name);
@@ -222,8 +221,6 @@ void gc_record_task_to_frame_edge(jl_task_t *from, jl_gcframe_t *to) {
     if (!it.second) return; // did the object already exist?
     FR("item inserted");
     it.first->second.set_parent(from);
-
-//    cout << "[gc_record_task_to_frame_edge] task: " << from << ", to: " << to << ", is task: " << jl_is_task(from) << endl;
 }
 
 void gc_record_frame_to_frame_edge(jl_gcframe_t *from, jl_gcframe_t *to){
@@ -253,7 +250,6 @@ void gc_record_module_edge(jl_module_t *from, jl_value_t *to, const char *name){
     if (!it.second) return; // did the object already exist?
     FR("item inserted");
 
-//    cout << "[gc_record_module_edge] from: " << from << " (" << jl_symbol_name(from->name) << "), to: " << to << ", name: " << name << endl;
     it.first->second.set_parent(from, name);
     target_found(to);
 }
@@ -274,12 +270,6 @@ void gc_record_object_edge(jl_value_t * const from, jl_value_t * const to, void*
     FR("item inserted");
     Object& object = it.first->second;
 
-//    bool is_tuple = jl_is_tuple(from);
-//    if(is_tuple){
-//        cout << "[gc_record_object_edge] from: " << from << ", to: " << to << ", slot: " << slot << ", type: " << to_string(jl_typeof(from))
-//                << ", byte_offset: " << ((uint8_t*) slot - reinterpret_cast<uint8_t*>( jl_data_ptr(from) )) << ", is_tuple: " << jl_is_tuple(from) << endl;
-//    }
-
     int field_index0 = -1; // index of the field in the object `from'
     stringstream ss; // construct the field name, e.g. x.y.z
     uint8_t* data = reinterpret_cast<uint8_t*>( jl_data_ptr(from) ); // data area for the current object
@@ -289,12 +279,10 @@ void gc_record_object_edge(jl_value_t * const from, jl_value_t * const to, void*
     bool error = false; // to break into the debugger
     uint32_t num_levels = 0; // keep track of the number of inlined structs
     do { // we could need multiple iterations to unwrap objects that are inlined inside others
-//        if(is_tuple){ cout << "iteration: " << num_levels << ", byte_offset: " << byte_offset << endl; }
         // find the matching field_index in the current object
         int num_fields = jl_datatype_nfields(dt);
         int field_index = num_fields - 1; // proceed backwards
         while(jl_field_offset(dt, field_index) > byte_offset){
-//            if(is_tuple){ cout << "field_index: " << field_index << ", byte_offset: " << byte_offset << ", field_offset: " << jl_field_offset(dt, field_index) << endl; }
             field_index --;
         }
         assert(field_index >= 0);
@@ -379,7 +367,7 @@ void gc_record_object_edge(jl_value_t * const from, jl_value_t * const to, void*
         jl_svec_t* field_names = jl_field_names(dt);
         for(size_t i = 0, N = jl_nfields(from); i < N; i++){
             cout << "[" << i << "] ";
-            if(!is_tuple){
+            if(!is_tuple && !is_named_tuple){
                 jl_sym_t* sym_field_name = (jl_sym_t*) jl_svecref(field_names, i);
                 string field_name = jl_symbol_name(sym_field_name);
                 cout << "name: " << field_name;
@@ -404,13 +392,20 @@ void gc_record_object_edge(jl_value_t * const from, jl_value_t * const to, void*
                 if(is_tuple){ cout << ", number of values: " << jl_nparams(fdt); }
                 cout << ", number of fields: " << jl_datatype_nfields(fdt) << "\n";
 
-                jl_svec_t* field_names = jl_field_names(fdt); // invalid if this is a tuple
+
+
                 for(size_t i = 0, N = jl_datatype_nfields(fdt); i < N; i++){
                     cout << "[" << i << "] ";
                     if(is_tuple){ // tuples don't have field names
                         jl_datatype_t* pdt = (jl_datatype_t*) jl_tparam(fdt, i);
                         cout << to_string((jl_value_t*) pdt) << " (" << pdt << ")";
+                    } else if (is_named_tuple){
+                        jl_value_t* field_names = jl_tparam0(dt);
+                        jl_sym_t* sym_field_name = (jl_sym_t*) jl_get_nth_field(field_names, i);
+                        string field_name = jl_symbol_name(sym_field_name);
+                        cout << "field name: " << field_name;
                     } else { // field name
+                        jl_svec_t* field_names = jl_field_names(fdt);
                         jl_sym_t* sym_field_name = (jl_sym_t*) jl_svecref(field_names, i);
                         string field_name = jl_symbol_name(sym_field_name);
                         cout << "field name: " << field_name;
@@ -435,18 +430,14 @@ void gc_record_internal_edge(jl_value_t *from, jl_value_t *to){
     FR("from: %p, to: %p", (void*) from, (void*) to);
     if (!g_recording) return;
 
-//    cout << "[gc_record_internal_edge] from: " << from << ", to: " << to << endl;
-//    break_into_debugger();
-
-//    target_found(to);
+    // nop ...
 }
 
 void gc_record_hidden_edge(jl_value_t *from, size_t bytes){
     FR("from: %p, bytes: %d", (void*) from, (int) bytes);
     if (!g_recording) return;
 
-//    cout << "[gc_record_hidden_edge] from " << from << endl;
-//    break_into_debugger();
+    // nop ...
 }
 
 } // extern "C"
@@ -483,7 +474,6 @@ void Object::set_parent(jl_task_t* task){
     m_type_ref = ReferenceType::TASK;
     auto it = g_index.find((jl_value_t*) task);
     if (it == g_index.end()){
-//        cout << "[ERROR] Cannot find the parent task for the frame: " << m_pointer << endl;
         STOP_AND_DEBUG
     } else {
         m_parent = &(it->second);
@@ -495,7 +485,6 @@ void Object::set_parent(jl_gcframe_t* frame){
     m_type_ref = ReferenceType::FRAME;
     auto it = g_index.find((jl_value_t*) frame);
     if (it == g_index.end()){
-//        cout << "[ERROR] Cannot find the parent frame for the object: " << m_pointer << endl;
         STOP_AND_DEBUG
     } else {
         m_parent = &(it->second);
@@ -507,7 +496,6 @@ void Object::set_parent(jl_value_t* array, uint64_t index) {
     m_type_ref = ReferenceType::ARRAY;
     auto it = g_index.find(array);
     if (it == g_index.end()){
-//        cout << "[ERROR] Cannot find the parent array[" << index << "] for the component: " << m_pointer << endl;
         STOP_AND_DEBUG
     } else {
         m_parent = &(it->second);
