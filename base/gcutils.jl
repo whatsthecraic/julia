@@ -200,4 +200,28 @@ collection to run.
 """
 safepoint() = ccall(:jl_gc_safepoint, Cvoid, ())
 
+"""
+    GC.addptr(object)
+
+Record the pointer for the given object
+"""
+function addptr(object::Any)
+    if !ismutable(object)
+        error("Objects of type ", typeof(object), " are immutable and are not garbage collected")
+    end
+    ccall(:jl_gc_addptr, Cvoid, (Ptr{Cvoid},), pointer_from_objref(object))
+end
+function addptr(pointer::Ptr)
+    ccall(:jl_gc_addptr, Cvoid, (Ptr{Cvoid},), pointer)
+end
+
+"""
+    GC.trace()
+
+Find the links to objects recorded w/ addptr
+"""
+function trace()
+    ccall(:jl_gc_trace, Cvoid, ())
+end
+
 end # module GC

@@ -206,9 +206,12 @@ static inline jl_task_t *multiq_deletemin(void)
 void jl_gc_mark_enqueued_tasks(jl_gc_mark_cache_t *gc_cache, jl_gc_mark_sp_t *sp)
 {
     int32_t i, j;
-    for (i = 0; i < heap_p; ++i)
-        for (j = 0; j < jl_atomic_load_relaxed(&heaps[i].ntasks); ++j)
+    for (i = 0; i < heap_p; ++i){
+        for (j = 0; j < jl_atomic_load_relaxed(&heaps[i].ntasks); ++j){
+            gc_record_root((jl_value_t *)heaps[i].tasks[j], "jl_gc_mark_enqueued_tasks");
             jl_gc_mark_queue_obj_explicit(gc_cache, sp, (jl_value_t *)heaps[i].tasks[j]);
+        }
+    }
 }
 
 

@@ -45,7 +45,8 @@ RUNTIME_SRCS := \
 	simplevector runtime_intrinsics precompile \
 	threading partr stackwalk gc gc-debug gc-pages gc-stacks method \
 	jlapi signal-handling safepoint timing subtype \
-	crc32c APInt-C processor ircode opaque_closure
+	crc32c APInt-C processor ircode opaque_closure \
+	gc-tracing flight-recorder
 SRCS := jloptions runtime_ccall rtutils
 
 LLVMLINK :=
