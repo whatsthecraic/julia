@@ -10,6 +10,7 @@
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
+#include <vector>
 
 #include "flight-recorder.h"
 #include "gc.h"
@@ -43,6 +44,7 @@ class Object {
         FIELD, // this is field in an object, tuple or task. The member m_name is always set.
     };
 
+
     jl_value_t* m_pointer; // actual Julia pointer
     Object* m_parent; // the link to the parent node
     ReferenceType m_type_ref; // the type of link between the parent and the child
@@ -50,12 +52,13 @@ class Object {
         string m_name; // the name of the field for an object
         uint64_t m_index; // the position of the slot for an array
 //    };
+    bool m_replaceable; // do you want to replace the parent if reached it again ?
 
     // Record a pointer from a task to a frame
     void set_stacktrace0(ReferenceType reftype, jl_value_t* from, jl_value_t* to);
 
 public:
-    Object(jl_value_t* object) : m_pointer(object), m_parent(nullptr), m_type_ref(ReferenceType::UNKNOWN), m_index(0){
+    Object(jl_value_t* object) : m_pointer(object), m_parent(nullptr), m_type_ref(ReferenceType::UNKNOWN), m_index(0), m_replaceable(false){
 
     }
 
@@ -79,6 +82,16 @@ public:
 
     // Record an index from an object
     void set_parent(jl_value_t* object, uint64_t field_index, const string& field_name);
+
+    // Replace this object is seen again ?
+    void set_repleaceable(bool value = true){
+        m_replaceable = value;
+    }
+
+    // Replace the parent if reached again?
+    bool is_replaceable() const {
+        return m_replaceable;
+    }
 
     // Dump the content of the object to a string
     string to_string() const {
@@ -189,27 +202,39 @@ int jl_gc_is_tracing_enabled() {
 
 // Callbacks from the GC
 
-// This is the main module, tasks or the TypeMap (which I'm still unsure what exactly is)
-void gc_record_root(jl_value_t *root, const char *name){
+static void gc_record_root0(jl_value_t* root, const char *name, bool is_replaceable){
     FR("root: %p, name: %s", (void*) root, name);
     if (!g_recording || root == nullptr) return;
 
     auto it = g_index.emplace(root, root);
-    if (!it.second) return; // does the root already exist?
-    FR("root inserted");
+    if(!it.second && !it.first->second.is_replaceable()) return; // does the root already exist?
+    if (it.second) { FR("root inserted"); } else { FR("root replaced"); }
 
     it.first->second.set_root(name);
-    target_found(root);
+    it.first->second.set_repleaceable(is_replaceable);
+    if(!is_replaceable) target_found(root);
 }
+
+// This is the main module, tasks or the TypeMap (which I'm still unsure what exactly is)
+void gc_record_root(jl_value_t* root, const char *name){
+    gc_record_root0(root, name, /* replaceable ? */ false);
+}
+
+// An object in the finalizer list. Julia is going to invoke its destructor once it ends out of reach
+void gc_record_finalizer(jl_value_t* finalizer){
+    gc_record_root0(finalizer, "finalizer", true);
+}
+
 
 void gc_record_frame_to_object_edge(jl_gcframe_t *from, jl_value_t *to) {
     FR("from: %p, to: %p", (void*) from, (void*) to)
     if (!g_recording) return;
 
     auto it = g_index.emplace(to, to);
-    if (!it.second) return; // did the object already exist?
+    if (!it.second || !it.first->second.is_replaceable()) return; // did the object already exist?
     FR("item inserted");
     it.first->second.set_parent(from);
+    it.first->second.set_repleaceable(false);
 
     target_found(to);
 }
@@ -218,27 +243,30 @@ void gc_record_task_to_frame_edge(jl_task_t *from, jl_gcframe_t *to) {
     FR("task: %p, frame: %p", (void*) from, (void*) to);
     if (!g_recording) return;
     auto it = g_index.emplace((jl_value_t *) to, (jl_value_t *) to);
-    if (!it.second) return; // did the object already exist?
+    if (!it.second || !it.first->second.is_replaceable()) return; // did the object already exist?
     FR("item inserted");
     it.first->second.set_parent(from);
+    it.first->second.set_repleaceable(false);
 }
 
 void gc_record_frame_to_frame_edge(jl_gcframe_t *from, jl_gcframe_t *to){
     FR("from: %p, to: %p", (void*) from, (void*) to);
     if (!g_recording) return;
     auto it = g_index.emplace((jl_value_t *) to, (jl_value_t *) to);
-    if (!it.second) return; // did the object already exist?
+    if (!it.second || !it.first->second.is_replaceable()) return; // did the object already exist?
     FR("item inserted");
     it.first->second.set_parent(from);
+    it.first->second.set_repleaceable(false);
 }
 
 void gc_record_array_edge(jl_value_t *from, jl_value_t *to, size_t index){
     FR("from: %p, to: %p, index: %d", (void*) from, (void*) to, (int) index);
     if (!g_recording) return;
     auto it = g_index.emplace(to, to);
-    if (!it.second) return; // did the object already exist?
+    if (!it.second || !it.first->second.is_replaceable()) return; // did the object already exist?
     FR("item inserted");
     it.first->second.set_parent(from, index);
+    it.first->second.set_repleaceable(false);
     target_found(to);
 }
 
@@ -247,10 +275,11 @@ void gc_record_module_edge(jl_module_t *from, jl_value_t *to, const char *name){
     FR("module: %p, value: %p, name: %s", (void*) from, (void*) to, name);
     if (!g_recording) return;
     auto it = g_index.emplace(to, to);
-    if (!it.second) return; // did the object already exist?
+    if (!it.second || !it.first->second.is_replaceable()) return; // did the object already exist?
     FR("item inserted");
 
     it.first->second.set_parent(from, name);
+    it.first->second.set_repleaceable(false);
     target_found(to);
 }
 
@@ -266,7 +295,7 @@ void gc_record_object_edge(jl_value_t * const from, jl_value_t * const to, void*
     FR("from: %p, to: %p, slot: %p", (void*) from, (void*) to, (void*) slot);
     if (!g_recording) return;
     auto it = g_index.emplace(to, to);
-    if (!it.second) return; // did the object already exist?
+    if (!it.second || !it.first->second.is_replaceable()) return; // did the object already exist?
     FR("item inserted");
     Object& object = it.first->second;
 
@@ -392,8 +421,6 @@ void gc_record_object_edge(jl_value_t * const from, jl_value_t * const to, void*
                 if(is_tuple){ cout << ", number of values: " << jl_nparams(fdt); }
                 cout << ", number of fields: " << jl_datatype_nfields(fdt) << "\n";
 
-
-
                 for(size_t i = 0, N = jl_datatype_nfields(fdt); i < N; i++){
                     cout << "[" << i << "] ";
                     if(is_tuple){ // tuples don't have field names
@@ -423,6 +450,7 @@ void gc_record_object_edge(jl_value_t * const from, jl_value_t * const to, void*
     } // END OF DEBUG ONLY
 
     object.set_parent(from, field_index0, field_name);
+    object.set_repleaceable(false);
     target_found(to);
 }
 
@@ -517,6 +545,29 @@ void Object::set_parent(jl_value_t* object, uint64_t field_index, const string& 
     m_name = field_name;
 }
 
+static string type2str(jl_datatype_t* dt){
+    // resolve the namespace ModuleX.ModuleY.TypeZ
+    vector<jl_sym_t*> modules;
+    jl_module_t* module = dt->name->module;
+    while (module != nullptr){
+        modules.push_back(module->name);
+
+        // next iteration
+        if(module == module->parent){ // top level module
+            module = nullptr;
+        } else {
+            module = module->parent;
+        }
+    }
+
+    stringstream ss;
+    for(int i = static_cast<int>(modules.size()) -1; i >= 0; i--){ // modules
+        ss << jl_symbol_name(modules[i]) << ".";
+    }
+    ss << jl_symbol_name(dt->name->name);
+    return ss.str();
+}
+
 void Object::dump_ancestor_chain(const Object& object){
     const Object* current = &object;
 
@@ -530,8 +581,7 @@ void Object::dump_ancestor_chain(const Object& object){
         } else if (parent == nullptr){
             cout << "<unknown>";
         } else {
-            string parent_type = ::to_string((jl_value_t*) jl_typeof(parent->m_pointer));
-            cout << parent->m_pointer << " ::" << parent_type;
+            cout << parent->m_pointer << " ::" << ::type2str((jl_datatype_t*) jl_typeof(parent->m_pointer));
         }
         cout << " -> ";
         bool insert_another_arrow = false;
@@ -546,10 +596,9 @@ void Object::dump_ancestor_chain(const Object& object){
         if (insert_another_arrow){
             cout << " -> ";
         }
-        string current_type = ::to_string((jl_value_t*) jl_typeof(current->m_pointer));
-        cout << current->m_pointer << " ::" << current_type;
-        cout << endl;
+        cout << current->m_pointer << " ::" << ::type2str((jl_datatype_t*) jl_typeof(current->m_pointer));
 
+        cout << endl;
 
         // next iteration
         current = parent;

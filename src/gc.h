@@ -708,6 +708,7 @@ JL_DLLEXPORT void jl_gc_addptr(void* pointer);
 JL_DLLEXPORT void jl_gc_trace();
 int jl_gc_is_tracing_enabled();
 // Copy & paste from https://github.com/JuliaLang/julia/pull/42286/files
+void gc_record_finalizer(jl_value_t *finalizer);
 void gc_record_root(jl_value_t *root, const char *name);
 void gc_record_frame_to_object_edge(jl_gcframe_t *from, jl_value_t *to);
 void gc_record_task_to_frame_edge(jl_task_t *from, jl_gcframe_t *to);

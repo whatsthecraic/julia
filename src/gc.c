@@ -2528,7 +2528,8 @@ finlist: {
                 finlist->begin = begin;
                 gc_repush_markdata(&sp, gc_mark_finlist_t);
             }
-            gc_record_root(new_obj, "finalizer"); // an object stored in the finalizer list
+            gc_record_finalizer(new_obj);
+
             goto mark;
         }
         goto pop;
